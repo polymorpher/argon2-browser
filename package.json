@@ -1,6 +1,6 @@
 {
     "name": "argon2-browser",
-    "version": "1.20.0-hpc",
+    "version": "1.21.0-hpc",
     "description": "Argon2 library compiled for browser runtime. Modded for high performance and batch hash generation.",
     "main": "lib/argon2.js",
     "directories": {
