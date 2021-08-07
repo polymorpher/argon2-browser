@@ -6,18 +6,37 @@
 #include "../argon2/src/encoding.h"
 #include "../argon2/src/core.h"
 
+int argon2_fast_hash_ext(const uint32_t t_cost, const uint32_t m_cost,
+                         const uint32_t parallelism, const void *pwd, const uint32_t numpwd,
+                         const size_t pwdlen, const void *salt, const size_t saltlen,
+                         void *hash, const size_t hashlen, char *encoded,
+                         const size_t encodedlen, argon2_type type) {
+    size_t all_hashlen = hashlen * numpwd;
+    unsigned i;
+    int result;
+    for (i = 0; i < numpwd; i++) {
+        result = argon2_hash(t_cost, m_cost, parallelism, pwd + i * pwdlen, pwdlen,
+                             salt, saltlen, hash, hashlen, encoded, encodedlen, type,
+                             ARGON2_VERSION_NUMBER);
+        if (result != ARGON2_OK) {
+            clear_internal_memory(hash, all_hashlen);
+            return result;
+        }
+    }
+    return ARGON2_OK;
+}
 // Copied from argon2/src/argon2.c with additional parameters: "secret"+len and "ad"+len
 
 int argon2_hash_ext(const uint32_t t_cost, const uint32_t m_cost,
-                const uint32_t parallelism, const void *pwd,
-                const size_t pwdlen, const void *salt, const size_t saltlen,
-                void *hash, const size_t hashlen, char *encoded,
-                const size_t encodedlen, argon2_type type,
-                /* argon2-browser: begin added parameters */
-                const void* secret, const size_t secretlen,
-                const void* ad, const size_t adlen,
-                /* argon2-browser: end added parameters */
-                const uint32_t version){
+                    const uint32_t parallelism, const void *pwd, const uint32_t numpwd,
+                    const size_t pwdlen, const void *salt, const size_t saltlen,
+                    void *hash, const size_t hashlen, char *encoded,
+                    const size_t encodedlen, argon2_type type,
+        /* argon2-browser: begin added parameters */
+                    const void *secret, const size_t secretlen,
+                    const void *ad, const size_t adlen,
+        /* argon2-browser: end added parameters */
+                    const uint32_t version) {
 
     argon2_context context;
     int result;
@@ -44,17 +63,21 @@ int argon2_hash_ext(const uint32_t t_cost, const uint32_t m_cost,
         return ARGON2_MEMORY_ALLOCATION_ERROR;
     }
 
-    context.out = (uint8_t *)out;
-    context.outlen = (uint32_t)hashlen;
-    context.pwd = CONST_CAST(uint8_t *)pwd;
-    context.pwdlen = (uint32_t)pwdlen;
-    context.salt = CONST_CAST(uint8_t *)salt;
-    context.saltlen = (uint32_t)saltlen;
+    context.out = (uint8_t *) out;
+    context.outlen = (uint32_t) hashlen;
+    context.pwd = CONST_CAST(uint8_t *)
+                    pwd;
+    context.pwdlen = (uint32_t) pwdlen;
+    context.salt = CONST_CAST(uint8_t *)
+                    salt;
+    context.saltlen = (uint32_t) saltlen;
     /* argon2-browser: begin changed parameters */
-    context.secret = CONST_CAST(uint8_t *)secret;
-    context.secretlen = (uint32_t)secretlen;
-    context.ad = CONST_CAST(uint8_t *)ad;
-    context.adlen = (uint32_t)adlen;
+    context.secret = CONST_CAST(uint8_t *)
+                    secret;
+    context.secretlen = (uint32_t) secretlen;
+    context.ad = CONST_CAST(uint8_t *)
+                    ad;
+    context.adlen = (uint32_t) adlen;
     /* argon2-browser: end changed parameters */
     context.t_cost = t_cost;
     context.m_cost = m_cost;
@@ -65,28 +88,44 @@ int argon2_hash_ext(const uint32_t t_cost, const uint32_t m_cost,
     context.flags = ARGON2_DEFAULT_FLAGS;
     context.version = version;
 
-    result = argon2_ctx(&context, type);
-
-    if (result != ARGON2_OK) {
-        clear_internal_memory(out, hashlen);
-        free(out);
-        return result;
-    }
-
-    /* if raw hash requested, write it */
-    if (hash) {
-        memcpy(hash, out, hashlen);
-    }
-
-    /* if encoding requested, write it */
-    if (encoded && encodedlen) {
-        if (encode_string(encoded, encodedlen, &context, type) != ARGON2_OK) {
-            clear_internal_memory(out, hashlen); /* wipe buffers if error */
-            clear_internal_memory(encoded, encodedlen);
+    if (numpwd > 0) {
+        size_t all_hashlen = hashlen * numpwd;
+        unsigned i;
+        for (i = 0; i < numpwd; i++) {
+            result = argon2_ctx(&context, type);
+            if (result != ARGON2_OK) {
+                clear_internal_memory(out, hashlen);
+                clear_internal_memory(hash, all_hashlen);
+                return result;
+            }
+            context.pwd = context.pwd + pwdlen;
+            if (hash) {
+                memcpy(hash + i * hashlen, out, hashlen);
+            }
+        }
+        // encoded is not supported in batch mode
+    } else {
+        result = argon2_ctx(&context, type);
+        if (result != ARGON2_OK) {
+            clear_internal_memory(out, hashlen);
             free(out);
-            return ARGON2_ENCODING_FAIL;
+            return result;
+        }
+        /* if raw hash requested, write it */
+        if (hash) {
+            memcpy(hash, out, hashlen);
+        }
+        /* if encoding requested, write it */
+        if (encoded && encodedlen) {
+            if (encode_string(encoded, encodedlen, &context, type) != ARGON2_OK) {
+                clear_internal_memory(out, hashlen); /* wipe buffers if error */
+                clear_internal_memory(encoded, encodedlen);
+                free(out);
+                return ARGON2_ENCODING_FAIL;
+            }
         }
     }
+
     clear_internal_memory(out, hashlen);
     free(out);
 
@@ -94,11 +133,11 @@ int argon2_hash_ext(const uint32_t t_cost, const uint32_t m_cost,
 }
 
 int argon2_verify_ext(const char *encoded, const void *pwd, const size_t pwdlen,
-                  /* argon2-browser: begin added parameters */
-                  const void* secret, const size_t secretlen,
-                  const void* ad, const size_t adlen,
-                  /* argon2-browser: end added parameters */
-                  argon2_type type) {
+        /* argon2-browser: begin added parameters */
+                      const void *secret, const size_t secretlen,
+                      const void *ad, const size_t adlen,
+        /* argon2-browser: end added parameters */
+                      argon2_type type) {
 
     argon2_context ctx;
     uint8_t *desired_result = NULL;
@@ -122,7 +161,7 @@ int argon2_verify_ext(const char *encoded, const void *pwd, const size_t pwdlen,
     }
 
     /* No field can be longer than the encoded length */
-    max_field_len = (uint32_t)encoded_len;
+    max_field_len = (uint32_t) encoded_len;
 
     ctx.saltlen = max_field_len;
     ctx.outlen = max_field_len;
@@ -134,8 +173,8 @@ int argon2_verify_ext(const char *encoded, const void *pwd, const size_t pwdlen,
         goto fail;
     }
 
-    ctx.pwd = (uint8_t *)pwd;
-    ctx.pwdlen = (uint32_t)pwdlen;
+    ctx.pwd = (uint8_t *) pwd;
+    ctx.pwdlen = (uint32_t) pwdlen;
 
     ret = decode_string(&ctx, encoded, type);
     if (ret != ARGON2_OK) {
@@ -151,18 +190,20 @@ int argon2_verify_ext(const char *encoded, const void *pwd, const size_t pwdlen,
     }
 
     /* argon2-browser: begin changed parameters */
-    ctx.secret = CONST_CAST(uint8_t *)secret;
-    ctx.secretlen = (uint32_t)secretlen;
-    ctx.ad = CONST_CAST(uint8_t *)ad;
-    ctx.adlen = (uint32_t)adlen;
+    ctx.secret = CONST_CAST(uint8_t *)
+                    secret;
+    ctx.secretlen = (uint32_t) secretlen;
+    ctx.ad = CONST_CAST(uint8_t *)
+                    ad;
+    ctx.adlen = (uint32_t) adlen;
     /* argon2-browser: end changed parameters */
 
-    ret = argon2_verify_ctx(&ctx, (char *)desired_result, type);
+    ret = argon2_verify_ctx(&ctx, (char *) desired_result, type);
     if (ret != ARGON2_OK) {
         goto fail;
     }
 
-fail:
+    fail:
     free(ctx.salt);
     free(ctx.out);
     free(desired_result);

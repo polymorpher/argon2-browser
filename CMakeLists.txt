@@ -22,7 +22,13 @@ set(sources
     src/argon2_library.c
 )
 
-if(${CMAKE_C_FLAGS} MATCHES simd)
+if(bench)
+    set(ARCHIVE_OUTPUT_DIRECTORY bench)
+    set(LIBRARY_OUTPUT_DIRECTORY bench)
+    set(RUNTIME_OUTPUT_DIRECTORY bench)
+    set(EXECUTABLE_OUTPUT_PATH bench)
+    list(APPEND sources argon2/src/ref.c src/bench.c)
+elseif(${CMAKE_C_FLAGS} MATCHES simd)
     list(APPEND sources argon2/src/opt.c)
 else()
     list(APPEND sources argon2/src/ref.c)
